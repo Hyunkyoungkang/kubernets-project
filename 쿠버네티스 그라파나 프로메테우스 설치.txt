@@ -1,0 +1,82 @@
+﻿# 헬름 설치
+
+
+
+
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+
+
+sudo apt-get install apt-transport-https --yes
+
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+
+sudo apt-get update
+
+
+sudo apt-get install helm
+
+
+
+
+# 네임스페이스 생성
+kubectl create namespace monitoring
+
+
+# 헬름 레포 등록
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+
+# 헬름 업데이트
+helm repo update
+
+
+# 프로메테우스 & 그라파나 설치
+helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring
+
+
+# pod 내용 확인
+kubectl get pods -n monitoring
+
+
+# 설치가 안되는 경우 여기를 클릭해 내용을 복사한 뒤 values.yaml 파일을 생성하고 아래 명령어를 실행시켜줍니다.
+https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml << 여기경로에서 파일 복사 후 실행 
+helm install prometheus prometheus-community/kube-prometheus-stack -f "values.yaml" --namespace monitoring
+
+
+
+
+# 서비스 확인
+kubectl get svc -n monitoring 
+
+
+#  포워딩 하기(굳이 안해도될듯??)
+kubectl port-forward service/prometheus-grafana 3000:80 --namespace monitoring
+
+
+# 외부접속을 위해 포트포워딩설정
+kubectl edit service -n monitoring prometheus-grafana
+
+
+### 노드포트 추가 및 타입수정
+  ports:
+  - name: http-web
+    nodePort: 31000 -> 외부에서 요청하는 포트번호 /  최소 30000번부터 사용가능하니 유의바람
+    port: 80
+    protocol: TCP
+    targetPort: 3000 
+  selector:
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/name: grafana
+  sessionAffinity: None
+  type: NodePort -> 포트 타입 바꾸기
+
+
+## 그라파나 창 띄우기
+웹 브라우저 주소창에 master, node01, node02, node03 IP:31000 으로 접속
+
+
+## 그라나파 계정정보
+id: admin
+pw: prom-operator

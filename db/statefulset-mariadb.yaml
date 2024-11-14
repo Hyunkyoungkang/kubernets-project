@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: deply-mariadb
+  namespace: database
+  labels:
+    app: mariadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb-container
+        image: mariadb:latest
+        env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: MYSQL_DATABASE
+        ports:
+        - containerPort: 3306
+
+        volumeMounts:
+          - name: sql-dump-volume
+            mountPath: /docker-entrypoint-initdb.d
+          - name: mariadb-volume
+            mountPath: /var/lib/mysql
+            subPath: "mysql"
+      volumes:
+        - name: sql-dump-volume
+          configMap:
+            name: dibdb-sql
+        - name: mariadb-volume
+          persistentVolumeClaim:
+             claimName: mariadb-pvc # pv 볼륨 설정
+
+               
+--- # 헤그리스 서비스
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-headless-svc
+  namespace: database
+spec:
+  clusterIP: None
+  selector:
+    app: mariadb
+  ports:
+    - port: 3306
+      targetPort: 3306

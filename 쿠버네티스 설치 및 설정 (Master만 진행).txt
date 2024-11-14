@@ -1,0 +1,187 @@
+﻿Kubernetes 초기화 (Master에서 작업)
+## pod-network-cide(10.x.x.x) 기본값=10.96.0.0/12 / [선택] service-cidr(20.x.x.x)
+## pod-network-cidr은 Pod 네트워크의 IP 주소 범위를 지정 설정된 경우 control plane은 모든 노드에 대해 CIDR을 자동으로 할당한다.
+## apiserver-advertise-address는 수신 대기 중임을 알릴 IP 주소. 설정하지 않으면 기본 네트워크 인터페이스이고, Master node의 IP를 설정해 주면 된다.
+## kubernetes control-plane bootstrap (초기화)
+## ubuntu@k8s-master:~$ sudo kubeadm init --pod-network-cidr=172.16.0.0/16 \
+## --apiserver-advertise-address=192.168.56.10
+
+
+ubuntu@k8s-master:~$ sudo kubeadm init --pod-network-cidr=10.96.0.0/12 \
+--apiserver-advertise-address=192.168.56.50
+...
+Your Kubernetes control-plane has initialized successfully!
+To start using your cluster, you need to run the following as a regular user:
+
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+Alternatively, if you are the root user, you can run:
+export KUBECONFIG=/etc/kubernetes/admin.conf
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+https://kubernetes.io/docs/concepts/cluster-administration/addons/
+Then you can join any number of worker nodes by running the following on each as root:
+
+
+kubeadm join 192.168.56.10:6443 --token 9e6odf.kvl1d6d69aazurar \
+--discovery-token-ca-cert-hash sha256:a4e82fd670435863956556a7728703bf7506a80cc17592295c9981789954d7bc
+
+
+kubeadm join 192.168.56.50:6443 --token mzmh91.8dq9m22jickzv7ug \
+        --discovery-token-ca-cert-hash sha256:2f3a6543e5bcc5c91f72eb9fc62cd6a1e1e8702a956091a44ab0dc9104d8c55e
+
+
+
+
+
+
+## kubernetes control plane 초기화, sudo권한 없이 kuberctlkuberctl사용하기
+## admin.conf conf구성 파일을 통해 Kubernetes 권한을 부여하여 실행하기 떄문에 별도 권한 지정 없이 진행
+
+
+ubuntu@k8s-master:~$ mkdir -p $HOME/.kube
+ubuntu@k8s-master:~$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+ubuntu@k8s-master:~$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+## kubectl 자동완성 기능 설치 >> 해도 되고 안해도 됨.
+ubuntu@k8s-master:~$ sudo apt install bash-completion -y
+ubuntu@k8s-master:~$ source <(kubectl completion bash)
+ubuntu@k8s-master:~$ echo "source <(kubectl completion bash)" >> ~/.bashrc
+ubuntu@k8s-master:~$ complete -F __start_kubectl k
+ubuntu@k8s-master:~$ vim ~/.bashrc
+
+
+
+
+## ~/.bashrc : executed by bash(1) for non-login shells.
+## for examples
+alias k=kubectl
+alias kg='kubectl get'
+alias kc='kubectl create'
+alias ka='kubectl apply'
+alias kr='kubectl run'
+alias kd='kubectl delete'
+complete -F __start_kubectl k
+ubuntu@k8s-master:~$ source ~/.bashrc
+
+
+## HostOS에 open된 port를 확인한다. 특히, kube-apiserver
+ubuntu@k8s-master:~$ sudo netstat -ntlp | grep LISTEN
+
+
+ubuntu@k8s-master:~$ kubectl get node
+
+
+ubuntu@k8s-master:~$ kubectl get po -A
+
+
+각 노드에서 실행
+## node01, node02, node03 노드에서 실행
+## k8s-master에 있는 내용을 복사해서 사용하세요. >> sudo -i 한 후, root로 진행하면 편함
+ubuntu@k8s-node01:~$ sudo kubeadm join 192.168.56.10:6443 --token 8s26xu.k75gpltctpjeyyu8 \
+--discovery-token-ca-cert-hash sha256:289de267a3c70547593ab7ab8f4bcd2f56ec648abfee380207b888ba165af17b
+
+
+Master에서 실행
+ubuntu@k8s-master:~$ kubectl get node -o wide
+
+
+ubuntu@k8s-master:~$ kubectl get po --all-namespaces
+
+
+ubuntu@k8s-master:~$ kubectl get po -A
+
+
+네트워크 설정 (Master에서 실행)
+## CNI 설정
+
+
+ubuntu@k8s-master:~$ curl -O \
+https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+
+
+ubuntu@k8s-master:~$ kubectl apply -f calico.yaml
+
+
+poddisruptionbudget.policy/calico-kube-controllers created
+serviceaccount/calico-kube-controllers created
+serviceaccount/calico-node created
+configmap/calico-config created
+customresourcedefinition.apiextensions.k8s.io/bgpconfigurations.crd.projectcalico.org created
+...
+clusterrole.rbac.authorization.k8s.io/calico-kube-controllers created
+clusterrole.rbac.authorization.k8s.io/calico-node created
+clusterrolebinding.rbac.authorization.k8s.io/calico-kube-controllers created
+clusterrolebinding.rbac.authorization.k8s.io/calico-node created
+daemonset.apps/calico-node created
+deployment.apps/calico-kube-controllers created
+
+
+## 조금 기다린 후 실행
+ubuntu@k8s-master:~$ kubectl get no
+
+
+ubuntu@k8s-master:~$ route -n
+
+
+ubuntu@k8s-master:~$ kubectl get po -A
+
+
+ubuntu@k8s-master:~$ kubectl cluster-info
+
+
+ubuntu@k8s-master:~$ kubeadm config print init-defaults
+
+
+
+
+오류 발생 시 상황별 조치 사항
+Kubeadm 삭제
+ubuntu@k8s-master:~$ sudo kubeadm reset
+
+
+VirtualBox에서 enp0s3(NAT)과 enp0s8(Host Only) 두 개의 어뎁터 사용시 Node의 INTERNAL-IP가 모두 NAT(10.0.2.5)로 표시 될 때
+## INTERNAL-IP 변경 방법
+ubuntu@k8s-master:~$ cat /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+......
+## 파일의 위치 확인
+EnvironmentFile=-/etc/default/kubelet
+......
+## 마스터노드와 워크노드 모두 Host Only IP로 변경해 준다.
+
+
+ubuntu@k8s-master:~$ sudo vim /etc/default/kubelet
+KUBELET_EXTRA_ARGS=--node-ip=192.168.56.10
+:wq
+
+
+ubuntu@k8s-node01:~$ sudo vim /etc/default/kubelet
+KUBELET_EXTRA_ARGS=--node-ip=192.168.56.101
+:wq
+
+
+ubuntu@k8s-node02:~$ sudo vim /etc/default/kubelet
+KUBELET_EXTRA_ARGS=--node-ip=192.168.56.102
+:wq
+
+
+ubuntu@k8s-node03:~$ sudo vim /etc/default/kubelet
+KUBELET_EXTRA_ARGS=--node-ip=192.168.56.103
+:wq
+
+
+
+
+## 마스터 노드와 워크 노드 모두에서 실행한다.
+## daemon 과 kubelet 재시작하기
+
+
+ubuntu@k8s-master:~$ sudo systemctl daemon-reload && sudo systemctl restart kubelet
+ubuntu@k8s-node01:~$ sudo systemctl daemon-reload && sudo systemctl restart kubelet
+ubuntu@k8s-node02:~$ sudo systemctl daemon-reload && sudo systemctl restart kubelet
+ubuntu@k8s-mode03:~$ sudo systemctl daemon-reload && sudo systemctl restart kubelet

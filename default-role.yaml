@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: default-service-account-role
+rules:
+  # Allow 'get' operation on deployments in apps/v1 API group
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list"]
+  # Allow 'get' operation on services in core (v1) API group
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "update", "delete"]

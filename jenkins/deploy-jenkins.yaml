@@ -1,0 +1,68 @@
+# jenkins deploy 생성
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deply-jenkins
+  namespace: jenkins
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins-server
+  template:
+    metadata:
+      labels:
+        app: jenkins-server
+    spec:
+      securityContext:
+              fsGroup: 1000
+              runAsUser: 0
+      serviceAccountName: jenkins-admin
+      containers:
+        - name: jenkins
+          image: hyunkyoungkang/jenkins-docker-gradle:latest
+          securityContext:  # 컨테이너내부에서 모든 권한 허용
+              privileged: true
+          ports:
+            -  containerPort: 8080
+            -  containerPort: 50000
+          volumeMounts:
+            - name: jenkins-data # 젠킨스 데이터 저장
+              mountPath: /var/jenkins_home
+            - name: docker-data # 젠킨스 도커 소켓 데이터 
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: jenkins-data
+          persistentVolumeClaim:
+            claimName: jenkins-pvc
+        - name: docker-data # 외부 도커 소켓 데이터 
+          hostPath:
+            path: /var/run/docker.sock
+---
+# 서비스 생성
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-service
+  namespace: default  # 'default' 네임스페이스에서 'jenkins-service'를 참조하려면
+spec:
+  type: ExternalName
+  externalName: jenkins-service.jenkins.svc.cluster.local  # 실제 외부 서비스의 DNS 이름
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-service
+  namespace: jenkins
+spec:
+  selector:
+    app: jenkins-server
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: jnlp
+      port: 50000
+      targetPort: 50000

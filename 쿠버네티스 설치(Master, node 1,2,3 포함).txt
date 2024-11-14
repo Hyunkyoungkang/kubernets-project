@@ -1,0 +1,283 @@
+﻿기본 설정 (Master에서 작업)
+
+
+## swap 비활성화
+ubuntu@k8s-master:~$ sudo swapoff -a && sudo sed -i '/swap/s/^/#/' /etc/fstab
+
+
+## 방화벽 비활성화
+ubuntu@k8s-master:~$ sudo systemctl stop ufw
+ubuntu@k8s-master:~$ sudo systemctl disable ufw
+
+
+## NTP를 통해 시간 동기화를 한다.
+ubuntu@k8s-master:~$ sudo apt install -y ntp
+ubuntu@k8s-master:~$ sudo systemctl restart ntp
+ubuntu@k8s-master:~$ sudo systemctl status ntp
+ubuntu@k8s-master:~$ sudo ntpq -p
+
+
+## IP 포워딩 활성화
+ubuntu@k8s-master:~$ sudo -i
+root@k8s-master:~# echo '1' > /proc/sys/net/ipv4/ip_forward
+root@k8s-master:~# cat /proc/sys/net/ipv4/ip_forward
+root@k8s-master:~# exit
+
+
+## containerd를 이용한 container runtime 구성
+ubuntu@k8s-master:~$ sudo cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
+overlay
+br_netfilter
+EOF
+
+
+## modprobe 프로그램은 요청된 모듈이 동작할 수 있도록 부수적인 모듈을
+## depmod 프로그램을 이용하여 검색해 필요한 모듈을 커널에 차례로 등록한다.
+ubuntu@k8s-master:~$ sudo modprobe overlay
+ubuntu@k8s-master:~$ sudo modprobe br_netfilter
+
+
+## 노드간 통신을 위한 iptables에 브릿지 관련 설정을 추가한다.
+ubuntu@k8s-master:~$ sudo cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri.conf
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+EOF
+
+
+ubuntu@k8s-master:~$ sudo cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+br_netfilter
+EOF
+
+
+ubuntu@k8s-master:~$ sudo cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+
+
+## sys 파라미터 적용
+ubuntu@k8s-master:~$ sudo sysctl --system
+
+
+Docker 설치 (Master에서 작업)
+## k8s runtime 준비 : contained, docker, CRI-O 중에 선택이고 여기서는 containerd 사용
+## apt가 HTTPS로 리포지터리를 사용하는 것을 허용하기 위한 패키지 및 docker에 필요한 패키지 설치
+ubuntu@k8s-master:~$ sudo apt-get update -y
+ubuntu@k8s-master:~$ sudo apt-get -y install apt-transport-https \
+ca-certificates curl software-properties-common gnupg2
+
+
+## 도커 공식 GPG 키 추가
+ubuntu@k8s-master:~$ sudo install -m 0755 -d /etc/apt/keyrings
+ubuntu@k8s-master:~$ sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+
+ubuntu@k8s-master:~$ sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+
+ubuntu@k8s-master:~$ echo \
+"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu \
+$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+
+ubuntu@k8s-master:~$ sudo apt update -y
+ubuntu@k8s-master:~$ apt-cache policy docker-ce
+
+
+## docker-ce와 관련 도구 및 containerd 설치
+ubuntu@k8s-master:~$ sudo apt-get install -y docker-ce docker-ce-cli \
+containerd.io docker-buildx-plugin docker-compose-plugin
+
+
+ubuntu@k8s-master:~$ docker version
+
+
+## containerd 설정
+ubuntu@k8s-master:~$ sudo sh -c "containerd config default > /etc/containerd/config.toml"
+ubuntu@k8s-master:~$ sudo vim /etc/containerd/config.toml
+
+
+disabled_plugin = []                                 ## [] CRI 제거 확인
+
+
+ubuntu@k8s-master:~$ sudo sed -i 's/ SystemdCgroup = false/ SystemdCgroup = true/' \
+/etc/containerd/config.toml
+
+
+ubuntu@k8s-master:~$ sudo systemctl restart containerd.service
+
+
+
+
+
+
+## docker daemon 설정
+ubuntu@k8s-master:~$ sudo vim /etc/docker/daemon.json
+{
+"exec-opts": ["native.cgroupdriver=systemd"],
+"log-driver": "json-file",
+"log-opts": {
+"max-size": "100m"
+},
+"storage-driver": "overlay2"
+}
+
+
+ubuntu@k8s-master:~$ sudo mkdir /etc/systemd/system/docker.service.d
+ubuntu@k8s-master:~$ sudo usermod -aG docker ubuntu
+ubuntu@k8s-master:~$ sudo systemctl daemon-reload
+ubuntu@k8s-master:~$ sudo systemctl enable docker
+ubuntu@k8s-master:~$ sudo systemctl restart docker
+ubuntu@k8s-master:~$ sudo systemctl status docker
+...
+q
+ubuntu@k8s-master:~$ sudo systemctl restart containerd.service
+ubuntu@k8s-master:~$ sudo systemctl status containerd.service
+...
+q
+ubuntu@k8s-master:~$ sudo reboot
+----
+ubuntu@k8s-master:~$ docker version
+ubuntu@k8s-master:~$ docker info
+
+
+Kubernetes 도구 설치 (Master에서 작업)
+## kubernetes 도구 설치 (1.28)
+ubuntu@k8s-master:~$ curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | \
+sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+
+\ 하나 때문에 안된 것
+ubuntu@k8s-master:~$ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] \
+https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' \ | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+
+ubuntu@k8s-master:~$ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+
+ubuntu@k8s-master:~$ sudo apt update -y
+ubuntu@k8s-master:~$ sudo apt-cache policy kubeadm
+kubeadm
+Installed: (none)
+Candidate: 1.28.5-1.1
+Version table:
+1.28.5-1.1 500
+500 https://pkgs.k8s.io/core:/stable:/v1.28/deb Packages
+1.28.4-1.1 500
+500 https://pkgs.k8s.io/core:/stable:/v1.28/deb Packages
+1.28.3-1.1 500
+500 https://pkgs.k8s.io/core:/stable:/v1.28/deb Packages
+
+
+ubuntu@k8s-master:~$ sudo apt install -y kubelet kubeadm kubectl
+ubuntu@k8s-master:~$ kubeadm version
+
+
+kubeadm version: &version.Info{Major:"1", Minor:"28", GitVersion:"v1.28.11",
+GitCommit:"f25b321b9ae42cb1bfaa00b3eec9a12566a15d91", GitTreeState:"clean", BuildDate:"2024-06-11T20:18:34Z",
+GoVersion:"go1.21.11", Compiler:"gc", Platform:"linux/amd64"}}
+
+
+ubuntu@m-k8s:~$ kubectl version -o yaml
+
+
+Client Version: v1.28.5
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+The connection to the server localhost:8080 was refused - did you specify the right host or port?
+
+
+ubuntu@k8s-master:~$ kubectl version
+kubernetes v1.28.5
+
+
+## 설치된 Kubernetes tool이 자동으로 업데이트 되는 것을 방지하기 위해 hold 시킨다.
+ubuntu@k8s-master:~$ sudo apt-mark hold kubelet kubeadm kubectl
+
+
+## 모든 노드에 설치되는 kubelet은 항상 start 상태를 유지해야 한다.
+ubuntu@k8s-master:~$ sudo systemctl daemon-reload
+ubuntu@k8s-master:~$ sudo systemctl restart kubelet.service
+ubuntu@k8s-master:~$ sudo systemctl enable --now kubelet.service
+
+
+## Master node의 모든 설정이 끝나면 worker node 복제를 위해 shutdown 한다.
+ubuntu@k8s-master:~$ sudo vim /etc/hosts
+127.0.0.1 localhost
+127.0.1.1 k8s-master
+192.168.56.50 k8s-master
+192.168.56.51 k8s-node01
+192.168.56.52 k8s-node02
+192.168.56.53 k8s-node03
+
+
+ubuntu@k8s-master:~$ sudo shutdown -h now
+
+
+
+
+
+
+Master VM으로 Node 복제하기
+node1, node2, node3 복제 수행
+
+
+● 이름: n1-k8s, MAC 주소 정책: “모든 네트워크 어댑터의 새 MAC 주소 생성”
+● 하나씩 부팅 후 IP 및 hostname 변경
+
+
+ubuntu@k8s-master:~$ sudo hostnamectl set-hostname k8s-node01
+ubuntu@k8s-master:~$ sudo vim /etc/hosts
+
+
+127.0.0.1 localhost
+127.0.1.1 k8s-node01
+192.168.56.50 k8s-master
+192.168.56.51 k8s-node01
+192.168.56.52 k8s-node02
+192.168.56.53 k8s-node03
+
+
+ubuntu@k8s-node01:~$ sudo systemctl restart NetworkManager
+ubuntu@k8s-node01:~$ sudo ip a
+ubuntu@k8s-node01:~$ sudo ping 192.168.56.1 -c4
+ubuntu@k8s-node01:~$ sudo ping 8.8.8.8 -c4
+ubuntu@k8s-node01:~$ sudo reboot
+
+
+
+
+모든 node 간의 통신 확인 (모든 VM에서 작업)
+## master에서
+ubuntu@k8s-master:~$ date
+ubuntu@k8s-master:~$ ssh ubuntu@k8s-node01
+ubuntu@k8s-master:~$ ssh ubuntu@k8s-node02
+ubuntu@k8s-master:~$ ssh ubuntu@k8s-node03
+ubuntu@k8s-master:~$ cat .ssh/known_hosts
+
+
+## node1에서
+ubuntu@k8s-node01:~$ date
+ubuntu@k8s-node01:~$ ssh ubuntu@k8s-master
+ubuntu@k8s-node01:~$ ssh ubuntu@k8s-node02
+ubuntu@k8s-node01:~$ ssh ubuntu@k8s-node03
+ubuntu@k8s-node01:~$ cat .ssh/known_hosts
+
+
+## node2에서
+ubuntu@k8s-node02:~$ date
+ubuntu@k8s-node02:~$ ssh ubuntu@k8s-master
+ubuntu@k8s-node02:~$ ssh ubuntu@k8s-node01
+ubuntu@k8s-node02:~$ ssh ubuntu@k8s-node03
+ubuntu@k8s-node02:~$ cat .ssh/known_hosts
+
+
+## node3에서
+ubuntu@k8s-node03:~$ date
+ubuntu@k8s-node03:~$ ssh ubuntu@k8s-master
+ubuntu@k8s-node03:~$ ssh ubuntu@k8s-node01
+ubuntu@k8s-node03:~$ ssh ubuntu@k8s-node02
+ubuntu@k8s-node03:~$ cat .ssh/known_hosts
